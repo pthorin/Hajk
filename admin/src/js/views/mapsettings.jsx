@@ -18,7 +18,7 @@
 // men UTAN NÅGRA GARANTIER; även utan underförstådd garanti för
 // SÄLJBARHET eller LÄMPLIGHET FÖR ETT VISST SYFTE.
 //
-// https://github.com/Johkar/Hajk2
+// https://github.com/hajkmap/Hajk
 
 import React from 'react';
 import { Component } from 'react';
@@ -125,8 +125,10 @@ $.fn.editable = function(component) {
         checkbox3.attr('checked', 'checked');
       }
 
-      expanded.append(checkbox, label);
-      toggled.append(checkbox2, label2);
+      if (node.parent().attr("data-expanded") !== undefined && node.parent().attr("data-toggled") !== undefined) {
+        expanded.append(checkbox, label);
+        toggled.append(checkbox2, label2);
+      }
       visible.append(checkbox3, label3);
 
       remove
@@ -216,7 +218,8 @@ class Menu extends Component {
       active: true,
       visibleAtStart: true,
       backgroundSwitcherBlack: true,
-      backgroundSwitcherWhite: true
+      backgroundSwitcherWhite: true,
+      toggleAllButton: false
     };
     this.state = state;
   }
@@ -242,7 +245,8 @@ class Menu extends Component {
           active: this.props.model.get('layerMenuConfig').active,
           visibleAtStart: this.props.model.get('layerMenuConfig').visibleAtStart,
           backgroundSwitcherBlack: this.props.model.get('layerMenuConfig').backgroundSwitcherBlack,
-          backgroundSwitcherWhite: this.props.model.get('layerMenuConfig').backgroundSwitcherWhite
+          backgroundSwitcherWhite: this.props.model.get('layerMenuConfig').backgroundSwitcherWhite,
+          toggleAllButton: this.props.model.get('layerMenuConfig').toggleAllButton
         });
         $(".tree-view li").editable(this);
         $(".tree-view > ul").sortable();
@@ -271,9 +275,6 @@ class Menu extends Component {
       $(".tree-view li").editable(this);
       $(".tree-view > ul").sortable();
     });
-
-    // $(".tree-view li").editable(this);
-    // $(".tree-view > ul").sortable();
 
     defaultState.layers = this.props.model.get('layers');
     this.setState(defaultState);
@@ -404,7 +405,8 @@ class Menu extends Component {
       active: this.state.active,
       visibleAtStart: this.state.visibleAtStart,
       backgroundSwitcherBlack: this.state.backgroundSwitcherBlack,
-      backgroundSwitcherWhite: this.state.backgroundSwitcherWhite
+      backgroundSwitcherWhite: this.state.backgroundSwitcherWhite,
+      toggleAllButton: this.state.toggleAllButton
     };
 
     var roots = $('.tree-view > ul > li');
@@ -459,17 +461,35 @@ class Menu extends Component {
    *
    */
   parseDrawSettings() {
+    var settings = {
+      drawOrderGroups: [],
+      groups: []
+    };
+
     var result = []
     ,   layers = $('.tree-view > ul > li')
     ,   j = layers.length;
+
+    var groups = [];
+
     layers.each((i, layer) => {
-      result.push({
-        drawOrder: j,
-        id: $(layer).data('id').toString()
-      })
-      j--
+      if ($(layer).data('type')) {
+        settings.drawOrderGroups.push({
+          "id": $(layer).data('id').toString(),
+          "name": $(layer).data('name').toString(),
+          "drawOrder": j          
+        });
+        j--
+      } else {
+        settings.groups.push({
+          drawOrder: j,
+          id: $(layer).data('id').toString()
+        })
+        j--
+      }
     })
-    return result;
+
+    return settings;
   }
 
   /**
@@ -520,7 +540,7 @@ class Menu extends Component {
   saveDrawOrder() {
     var settings = this.parseDrawSettings();
 
-    settings.forEach(setting => {
+    settings.groups.forEach(setting => {
       var layer = this.props.model.findLayerInConfig(setting.id);
       if (layer) {
         layer.drawOrder = setting.drawOrder;
@@ -529,21 +549,13 @@ class Menu extends Component {
 
     var config = this.props.model.get('layerMenuConfig');
 
-    this.props.model.updateConfig(config, success => {
-      if (success) {
-        this.setState({
-          content: "mapsettings",
-          alert: true,
-          alertMessage: "Uppdateringen lyckades."
-        });
-        this.forceUpdate();
-      } else {
-        this.setState({
-          alert: true,
-          alertMessage: "Uppdateringen misslyckades."
-        });
-      }
+    var newDrawOrder = [];
+    settings.drawOrderGroups.forEach(drawOrderGroupsConfig => {
+      newDrawOrder.push(drawOrderGroupsConfig);
     });
+    config.drawOrderGroups = newDrawOrder;
+
+    this.save(config);
 
   }
 
@@ -596,6 +608,24 @@ class Menu extends Component {
   /**
    *
    */
+  createDrawOrderGroup(name, expanded, toggled) {
+    var id = this.createGuid();
+    var group = $(`
+      <li
+        class="group-node"
+        data-id="${id}"
+        data-type="group"
+        data-name="${name}">
+        <span class="group-name">${name}</span>
+      </li>`
+    );
+    $('.tree-view > ul').prepend(group);
+    group.editable(this);
+  }
+
+  /**
+   *
+   */
   addLayerToMenu(id, included) {
     if (included) {
       this.setState({
@@ -615,11 +645,29 @@ class Menu extends Component {
    */
   renderLayersFromConfig(layers) {
 
-    var filter = this.state.filter;
-    layers = (this.state && this.state.filter) ? this.getLayersWithFilter() : this.props.model.get('layers');
-    if (filter) {
-      layers.sort(function(a,b) { return (a.caption.toLowerCase() > b.caption.toLowerCase()) ? 1 : ((b.caption.toLowerCase() > a.caption.toLowerCase()) ? -1 : 0);});
-      layers.sort(function(x,y) { return (y.caption.toLowerCase().startsWith(filter)) ? 1 : ((x.caption.toLowerCase().startsWith(filter)) ? -1 : 0);});
+    layers = this.state.filter ? this.getLayersWithFilter() : this.props.model.get('layers');
+
+    var startsWith = [];
+    var alphabetically = [];
+
+    if (this.state.filter) {
+      layers.forEach(layer => {
+        layer.caption.toLowerCase().indexOf(this.state.filter) == 0 ? startsWith.push(layer) : alphabetically.push(layer);
+      });
+
+      startsWith.sort(function(a, b) {
+        if(a.caption.toLowerCase() < b.caption.toLowerCase()) return -1;
+        if(a.caption.toLowerCase() > b.caption.toLowerCase()) return 1;
+        return 0; 
+      });
+
+      alphabetically.sort(function(a, b) {
+        if(a.caption.toLowerCase() < b.caption.toLowerCase()) return -1;
+        if(a.caption.toLowerCase() > b.caption.toLowerCase()) return 1;
+        return 0; 
+      });
+        
+      layers = startsWith.concat(alphabetically);
     }
 
     return layers.map((layer, i) => {
@@ -680,7 +728,7 @@ class Menu extends Component {
             } else {
               visible = layer.visibleAtStart;
             }
-          }          
+          }
           var className = visible ? "layer-node visible" : "layer-node";
           leafs.push(
             <li
@@ -812,6 +860,8 @@ class Menu extends Component {
   renderDrawOrder() {
 
     function flatten(config) {
+      var drawOrderGroups = [];
+
       var layerList = [];
       function fromGroups(groups) {
         return groups.reduce((list, n, index, array) => {
@@ -828,23 +878,51 @@ class Menu extends Component {
 
     var layers = flatten(this.props.model.get('layerMenuConfig'));
 
+    this.props.model.get('layerMenuConfig').drawOrderGroups.forEach(drawOrderGroupsConfig => {
+      layers.push(drawOrderGroupsConfig);
+    });
+
     layers.sort((a, b) => a.drawOrder === b.drawOrder ? 0 : a.drawOrder < b.drawOrder ? -1 : 1);
     layers = layers.reverse();
 
+
+    $(".tree-view li").editable(this);
+
     return layers.map((layer, i) => {
       var name = this.getLayerNameFromId(layer.id);
-      return (
-        <li className="layer-node" key={Math.round(Math.random() * 1000000)} data-id={layer.id}>{name}</li>
-      )
+
+      if(layer.hasOwnProperty('name')) {
+        return (
+          <li
+            className="group-node"
+            key={i}
+            data-id={layer.id}
+            data-type="group"
+            data-expanded={layer.expanded}
+            data-toggled={layer.toggled}
+            data-name={layer.name}>
+            <span className="group-name">{layer.name}</span>
+          </li>
+        )
+      } else {
+        return (
+          <li className="layer-node" key={Math.round(Math.random() * 1E6)} data-id={layer.id}>{name}</li>
+        ) 
+      }
     });
   }
 
   handleInputChange(event) {
     const target = event.target;
-    const value = target.type === 'checkbox' ? target.checked : target.value;
     const name = target.name;
+    var value = target.type === 'checkbox' ? target.checked : target.value;
+
+    if (typeof value === "string" && /^[\d\.\, ]+$/.test(value)) {
+      value = value.replace(/,/g, '').replace(/ /g, '').Number(value);
+    }
+
     this.setState({
-      [name]: !isNaN(Number(value)) ? Number(value) : value
+      [name]: value
     });
   }
 
@@ -872,6 +950,7 @@ class Menu extends Component {
             <fieldset className="tree-view">
               <legend>Hantera ritordning</legend>
               <button className="btn btn-primary" onClick={(e) => this.saveDrawOrder(e)}>Spara</button>&nbsp;
+              <button className="btn btn-success" onClick={(e) => this.createDrawOrderGroup("Ny grupp", false, false)}>Ny grupp</button>&nbsp;
               <ul>
                 {this.renderDrawOrder()}
               </ul>
@@ -929,6 +1008,15 @@ class Menu extends Component {
                   onChange={(e) => {this.handleInputChange(e)}}
                   checked={this.state.backgroundSwitcherWhite}/>&nbsp;
                 <label htmlFor="backgroundSwitcherWhite">Vit bakgrundskarta</label>
+              </div>
+              <div>
+                <input
+                  id="toggleAllButton"
+                  name="toggleAllButton"
+                  type="checkbox"
+                  onChange={(e) => {this.handleInputChange(e)}}
+                  checked={this.state.toggleAllButton}/>&nbsp;
+                <label htmlFor="toggleAllButton">Släck alla lager-knapp</label>
               </div>
               {this.renderLayerMenu()}
             </fieldset>
