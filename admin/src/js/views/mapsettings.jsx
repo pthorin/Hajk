@@ -58,8 +58,10 @@ $.fn.editable = function(component) {
         let expanded = checkbox.is(':checked');
         node.html(name);
         node.parent().attr("data-name", name);
-        node.parent().attr("data-toggled", toggled);
-        node.parent().attr("data-expanded", expanded);
+        if (node.parent().attr("data-expanded") !== undefined && node.parent().attr("data-expanded") !== false) {
+          node.parent().attr("data-toggled", toggled);
+          node.parent().attr("data-expanded", expanded);
+        }
         reset();
       }
 
